@@ -79,15 +79,39 @@ def process_dataset_interactive(args):
     
     dataset, schema_key = load_dataset_by_name(args.dataset)
     
-    llm = BaseLM(args.model,args.dataset, 'cuda', args.do_cot, device_map = 'auto', constraint_mode = args.constraint_mode, steps = args.steps, gen_length = args.gen_length,
-                 block_length = args.block_length, temperature = args.temperature, cfg_scale = args.cfg_scale, remasking = args.remasking, constrain_at = args.constrain_at, enable_oppurtunistic = args.enable_oppurtunistic, schema_key = schema_key)
+    llm = BaseLM(
+        args.model,
+        args.dataset, 
+        'cuda', 
+        args.do_cot, 
+        device_map = 'auto', 
+        constraint_mode = args.constraint_mode, 
+        steps = args.steps, 
+        gen_length = args.gen_length,
+        block_length = args.block_length, 
+        temperature = args.temperature, 
+        cfg_scale = args.cfg_scale, 
+        remasking = args.remasking, 
+        constrain_at = args.constrain_at, 
+        enable_oppurtunistic = args.enable_oppurtunistic, 
+        schema_key = schema_key
+        )
     
     if args.end_idx == -1:
         args.end_idx = len(dataset)
     
     dataset = dataset.select(range(args.start_idx, args.end_idx))
     if args.constraint_mode in ['diffusion_constrained', 'ar_constrained']:
-        dfa_stores = build_for_dataset(dataset, schema_key, args.dataset, args.do_cot, llm.tokenizer, llm.model.device, args.enable_oppurtunistic)
+        dfa_stores = build_for_dataset(
+            dataset, 
+            schema_key, 
+            args.dataset,
+            args.do_cot, 
+            llm.tokenizer, 
+            llm.model.device, 
+            args.enable_oppurtunistic, 
+            args.constraint_mode
+            )
     else:
         dfa_stores = [None] * len(dataset)
     
@@ -154,7 +178,16 @@ def process_dataset_parallel(args):
     dataset = dataset.select(range(args.start_idx, args.end_idx))
     
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code = True, cache_dir = os.environ['HF_CACHE'])
-    dfa_stores = build_for_dataset(dataset, schema_key, args.dataset, args.do_cot, tokenizer, llm.model.device, args.enable_oppurtunistic)
+    dfa_stores = build_for_dataset(
+        dataset,
+        schema_key, 
+        args.dataset, 
+        args.do_cot, 
+        tokenizer, 
+        llm.model.device, 
+        args.enable_oppurtunistic, 
+        args.constraint_mode
+        )
     
     results = []
     processed_ids = set()

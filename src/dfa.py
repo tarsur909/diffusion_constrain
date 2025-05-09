@@ -23,10 +23,11 @@ def sha256_digest(s: str) -> str:
         
 
 class DFAMatrixStore:
-    def __init__(self, task_name, do_cot=False, enable_oppurtunistic=False):
+    def __init__(self, task_name, do_cot=False, enable_oppurtunistic=False, constraint_mode="diffusion_constrained"):  
         self.task_name = task_name
         self.suffix = 'cot' if do_cot else 'std'
         self.enable_oppurtunistic = enable_oppurtunistic
+        self.constraint_mode = constraint_mode
     
     def get_tok_name(self, tokenizer):
         if 'llada' in tokenizer.name_or_path.lower():
@@ -63,10 +64,10 @@ class DFAMatrixStore:
         dfa.initialize(pattern)
         return dfa
     
-    def load(self, schema, idx, tokenizer):
+    def load(self, schema, idx, tokenizer, constraint_mode):
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         if schema is not None:
-            self.fpath = f'{current_file_dir}/dfa_store/{self.task_name}_schema{idx}_{self.get_tok_name(tokenizer)}.dill'
+            self.fpath = f'{current_file_dir}/dfa_store/{self.task_name}_schema{idx}_{self.get_tok_name(tokenizer)}_{constraint_mode}.dill'
             if os.path.exists(self.fpath):
                 old_obj = self.load_obj(self.fpath)
                 old_obj.dfa = self.load_regex_dfa(schema, None)
@@ -75,7 +76,7 @@ class DFAMatrixStore:
                 return None, None
 
         else:
-            self.fpath = f'{current_file_dir}/dfa_store/{self.task_name}_{self.suffix}_{self.get_tok_name(tokenizer)}.dill'
+            self.fpath = f'{current_file_dir}/dfa_store/{self.task_name}_{self.suffix}_{self.get_tok_name(tokenizer)}_{constraint_mode}.dill'
             grammar_path = f'{current_file_dir}/grammar_folder/{self.task_name}_{self.suffix}.lark'
             if os.path.exists(grammar_path):
                 with open(grammar_path, 'r') as f:
@@ -182,13 +183,12 @@ class DFAMatrixStore:
         return edge_src, edge_dst, edge_tok
     
     def build(self, schema, idx, tokenizer):
-        new_obj, grammar_string = self.load(schema, idx, tokenizer)
+        new_obj, grammar_string = self.load(schema, idx, tokenizer, self.constraint_mode)
+
         if new_obj is not None:
             return new_obj
-        
         dfa = self.load_regex_dfa(schema, grammar_string)
-        
-        
+                              
         # Get initial state and final states using the new methods
         initial_state = dfa.get_initial_state()
         final_states = dfa.get_final_states()
@@ -253,10 +253,20 @@ class DFAMatrixStore:
         self.token_transitions = token_transitions
         self.decoded_mask_id = tokenizer.decode(mask_id)
         
+        if self.constraint_mode == "ar_constrained":
+            from syncode import SyncodeLogitsProcessor, Grammar
+            if schema is not None:
+                pattern = build_regex_from_schema(schema)
+                syncode_grammar = Grammar(f"start: {pattern}")
+            else:
+                # Use the original grammar string directly instead of converting to regex
+                syncode_grammar = Grammar(grammar_string)
+            self.logits_processor = SyncodeLogitsProcessor(syncode_grammar, tokenizer=tokenizer)
+
         Path(self.fpath).parent.mkdir(parents=True, exist_ok=True) 
         with open(self.fpath, 'wb') as f:
             dill.dump(self, f)
-        
+
         self.dfa = dfa
         return self
 
@@ -317,15 +327,16 @@ class DFAMatrixStore:
 
     def ar_logits_process(self, input_ids, scores):
         #traverse each token in the vocabulary and check if the next token is valid and if is not then set the score to -inf
-        for token_id in range(scores.shape[2]):
-            if not self.is_valid_ar(input_ids, token_id):
-                scores[:, :, token_id] = -float('inf')
+        # for token_id in range(scores.shape[2]):
+        #     if not self.is_valid_ar(input_ids, token_id):
+        #         scores[:, :, token_id] = -float('inf')
+        scores = self.logits_processor(input_ids, scores)
         return scores
 
 
-def build_for_dataset(dataset, schema_key, task_name, do_cot, tokenizer, device, enable_oppurtunistic = False):
+def build_for_dataset(dataset, schema_key, task_name, do_cot, tokenizer, device, enable_oppurtunistic = False, constraint_mode = "diffusion_constrained"):
     if schema_key is None:
-        dfa_store = DFAMatrixStore(task_name, do_cot, enable_oppurtunistic).build(None, None, tokenizer)
+        dfa_store = DFAMatrixStore(task_name, do_cot, enable_oppurtunistic, constraint_mode).build(None, None, tokenizer)
         dfa_store.edge_src = dfa_store.edge_src.to(device)
         dfa_store.edge_dst = dfa_store.edge_dst.to(device)
         dfa_store.edge_tok = dfa_store.edge_tok.to(device)
@@ -335,5 +346,6 @@ def build_for_dataset(dataset, schema_key, task_name, do_cot, tokenizer, device,
         for row in dataset:
             schema = row[schema_key]
             idx = row['idx']
-            dfa_stores.append(DFAMatrixStore(task_name, do_cot, enable_oppurtunistic).build(schema, idx, tokenizer))
+            dfa_stores.append(DFAMatrixStore(task_name, do_cot, enable_oppurtunistic, constraint_mode).build(schema, idx, tokenizer))
         return dfa_stores
+    

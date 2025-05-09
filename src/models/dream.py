@@ -138,9 +138,10 @@ class DREAM:
     def __call__(self, prompt, dfa_store = None):
         if dfa_store is not None:
             self.dfa_store = dfa_store
-            self.edge_src = dfa_store.edge_src
-            self.edge_dst = dfa_store.edge_dst
-            self.edge_tok = dfa_store.edge_tok
+            if self.constraint_mode == 'diffusion_constrained': 
+                self.edge_src = dfa_store.edge_src
+                self.edge_dst = dfa_store.edge_dst
+                self.edge_tok = dfa_store.edge_tok
         
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         if self.constraint_mode in ['unconstrained', 'ar_constrained', 'diffusion_constrained']:
